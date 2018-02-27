@@ -54,9 +54,9 @@ def ros_detections_callback(msg):
         x2, y2 = detection.bottom_right_corner.x, detection.bottom_right_corner.y
 
         # rescale the bounding box to match the size of the image
-        scale_ratio = float(cv_image.shape[0]) / float(msg.image_height)
-        x1, y1 = int(scale_ratio*x1), int(scale_ratio*y1)
-        x2, y2 = int(scale_ratio*x2), int(scale_ratio*y2)
+        #scale_ratio = float(cv_image.shape[0]) / float(msg.image_height)
+        #x1, y1 = int(scale_ratio*x1), int(scale_ratio*y1)
+        #x2, y2 = int(scale_ratio*x2), int(scale_ratio*y2)
 
         # draw bounding box
         cv2.rectangle(cv_image, (x1,y1), (x2,y2), (0,255,0), 1)
