@@ -1,0 +1,5 @@
+string label
+float32 likelihood
+string origin
+darknet_ros/Integer2DPoint top_left_corner
+darknet_ros/Integer2DPoint bottom_right_corner

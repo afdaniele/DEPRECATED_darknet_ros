@@ -1,0 +1,112 @@
+#!/usr/bin/env python
+
+# @Author: Andrea F. Daniele <afdaniele>
+# @Date:   Wednesday, February 21st 2018
+# @Email:  afdaniele@ttic.edu
+# @Last modified by:   afdaniele
+# @Last modified time: Thursday, February 22nd 2018
+
+import sys, os
+import cv2
+
+import rospy
+from sensor_msgs.msg import Image
+from darknet_ros.msg import Integer2DPoint, Detection, DetectionsList
+
+from cv_bridge import CvBridge
+import numpy as np
+
+opencv_bridge = None
+ros_image_publisher = None
+image_buffer_size = 60
+labels_font_size = 0.9
+
+image_first_seq = 0
+image_buffer = None
+
+def ros_image_callback(msg):
+    global image_buffer_size, opencv_bridge, image_first_seq, image_buffer
+    # get current image
+    cv_image = opencv_bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+    image_seq = msg.header.seq
+    # initialize the image buffer (if this is the first message)
+    if image_buffer is None:
+        image_buffer = np.zeros( (image_buffer_size, cv_image.shape[0], cv_image.shape[1], cv_image.shape[2]), np.uint8 )
+        image_first_seq = image_seq
+    # put image into the buffer
+    image_pos = (image_seq - image_first_seq) % image_buffer_size
+    # append image to the buffer
+    image_buffer[image_pos] = cv_image
+
+
+def ros_detections_callback(msg):
+    global opencv_bridge, ros_image_publisher, image_first_seq, image_buffer
+    # get the corresponding image from the buffer
+    image_seq = msg.image_seq
+    image_pos = (image_seq - image_first_seq) % image_buffer_size
+    cv_image = image_buffer[image_pos]
+    # put bounding boxes around the detected objects
+    detections = msg.detections
+    for detection in detections:
+        class_name = detection.label
+        # get top-left and bottom-right corners of the bounding box
+        x1, y1 = detection.top_left_corner.x, detection.top_left_corner.y
+        x2, y2 = detection.bottom_right_corner.x, detection.bottom_right_corner.y
+
+        # rescale the bounding box to match the size of the image
+        scale_ratio = float(cv_image.shape[0]) / float(msg.image_height)
+        x1, y1 = int(scale_ratio*x1), int(scale_ratio*y1)
+        x2, y2 = int(scale_ratio*x2), int(scale_ratio*y2)
+
+        # draw bounding box
+        cv2.rectangle(cv_image, (x1,y1), (x2,y2), (0,255,0), 1)
+
+        # draw label
+        label_size, _ = cv2.getTextSize(class_name, cv2.FONT_HERSHEY_DUPLEX, labels_font_size, 1)
+        lbl_w, lbl_h = label_size
+        cv2.rectangle(cv_image, (x1,y1-lbl_h-2), (x1+lbl_w+20,y1), (0,255,0), -1)
+        cv2.putText(cv_image, class_name, (x1+10,y1-1), cv2.FONT_HERSHEY_DUPLEX, labels_font_size, (1,1,1), 1 )
+
+    # create Image message
+    img_msg = opencv_bridge.cv2_to_imgmsg(cv_image, 'bgr8')
+    img_msg.header = msg.header
+    img_msg.width = cv_image.shape[1]
+    img_msg.height = cv_image.shape[0]
+    img_msg.encoding = "bgr8"
+
+    # publish result
+    ros_image_publisher.publish( img_msg )
+
+
+
+if __name__ == '__main__':
+    # check the presence of the ros topic to subscribe to
+    arguments = [ arg for arg in sys.argv[1:] if arg[:2] != '__' ]
+    if len(arguments) != 2:
+        print 'Usage:'
+        print '\troslaunch darknet_ros darknet_rviz.launch image:=<input_image_topic> namespace:=<output_namespace>\n'
+        exit()
+    # get image topic
+    image_topic = arguments[0]
+    output_namespace = arguments[1]
+
+    # get namespace
+    output_namespace = output_namespace if output_namespace[-1] != '/' else output_namespace[:-1]
+    detections_in_topic = "%s/%s" % (output_namespace, 'detections')
+    image_out_topic = "%s/%s/%s" % (output_namespace, 'detections', 'image')
+
+    # initialize ROS node
+    rospy.init_node('darknet_viz')
+
+    # initialize ROS<->OpenCV bridge
+    opencv_bridge = CvBridge()
+
+    # subscribe to stream of images
+    rospy.Subscriber(image_topic, Image, ros_image_callback, queue_size=1)
+    rospy.Subscriber(detections_in_topic, DetectionsList, ros_detections_callback, queue_size=1)
+
+    # advertise new ROS topic
+    ros_image_publisher = rospy.Publisher(image_out_topic, Image, queue_size=1)
+
+    # consume messages
+    rospy.spin()

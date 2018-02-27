@@ -1,0 +1,6 @@
+<launch>
+    <arg name="image" doc="Input topic of sensor_msgs/Image messages" />
+    <arg name="namespace" default="darknet" doc="Prefix of the output topic of darknet_ros/ObjectDetections messages" />
+
+    <node pkg="darknet_ros" type="darknet_node" name="darknet_detector" args="$(arg image) $(arg namespace)" cwd="node" />
+</launch>

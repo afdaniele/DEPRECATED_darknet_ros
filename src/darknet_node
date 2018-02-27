@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+
+# @Author: Andrea F. Daniele <afdaniele>
+# @Date:   Wednesday, February 21st 2018
+# @Email:  afdaniele@ttic.edu
+# @Last modified by:   afdaniele
+# @Last modified time: Thursday, February 22nd 2018
+
+import sys, os
+
+import darknet as dn
+import cv2
+
+import math
+import rospy
+from sensor_msgs.msg import Image
+from darknet_ros.msg import Integer2DPoint, Detection, DetectionsList
+
+from cv_bridge import CvBridge
+
+opencv_bridge = None
+darknet_net = None
+darknet_meta = None
+use_tiny_yolo = False
+preproc_img_width = 340
+ros_detections_publisher = None
+c_image_buffer = None
+darknet_likel_thr = 0.4
+
+
+# utility functions
+def array_to_image(arr):
+    arr = arr.transpose(2,0,1)
+    c, h, w = arr.shape
+    arr = (arr/255.0).flatten()
+    data = dn.c_array(dn.c_float, arr)
+    im = dn.IMAGE(w,h,c,data)
+    return im
+
+def detect(net, meta, image, thresh=.5, hier_thresh=.5, nms=.45):
+    boxes = dn.make_boxes(net)
+    probs = dn.make_probs(net)
+    num =   dn.num_boxes(net)
+    dn.network_detect(net, image, thresh, hier_thresh, nms, boxes, probs)
+    res = []
+    for j in range(num):
+        for i in range(meta.classes):
+            if probs[j][i] > 0:
+                res.append((meta.names[i], probs[j][i], (boxes[j].x, boxes[j].y, boxes[j].w, boxes[j].h)))
+    res = sorted(res, key=lambda x: -x[1])
+    dn.free_ptrs(dn.cast(probs, dn.POINTER(dn.c_void_p)), num)
+    return res
+
+def ros_image_callback(data):
+    global opencv_bridge, darknet_net, darknet_meta, ros_detections_publisher, c_image_buffer
+    # get image from ROS message
+    cv_image = opencv_bridge.imgmsg_to_cv2(data, desired_encoding="rgb8")
+
+    # resize image to improve performances
+    img_ratio = float(cv_image.shape[0])/float(cv_image.shape[1])
+    preproc_img_height = int(math.ceil( img_ratio * preproc_img_width ))
+    cv_image = cv2.resize(cv_image, (preproc_img_width,preproc_img_height))
+
+    # convert image to C array
+    im = array_to_image(cv_image)
+
+    # use darknet to detect objects in the current frame
+    detections = detect(darknet_net, darknet_meta, im, darknet_likel_thr)
+
+    # create result message
+    detections_msg = DetectionsList()
+
+    # copy image id from the input message
+    detections_msg.image_seq = data.header.seq
+    detections_msg.image_width = preproc_img_width
+    detections_msg.image_height = preproc_img_height
+
+    # put detections into a Detection list
+    for detection in detections:
+        # get detection content
+        class_name, likelihood, bbox = detection
+        x, y, w, h = bbox
+        x1 = int(x - w/2 + 1)
+        y1 = int(y - y/2 + 1)
+        x2 = int(x + w/2 + 1)
+        y2 = int(y + y/2 + 1)
+        if x1 < 0: x1 = 0
+        if y1 < 0: y1 = 0
+        # create detection msg
+        d_msg = Detection()
+        # put detection content into a Detection message
+        d_msg.label = class_name
+        d_msg.likelihood = likelihood
+        d_msg.origin = 'top-left-corner'
+        d_msg.top_left_corner = Integer2DPoint()
+        d_msg.top_left_corner.x = x1
+        d_msg.top_left_corner.y = y1
+        d_msg.bottom_right_corner = Integer2DPoint()
+        d_msg.bottom_right_corner.x = x2
+        d_msg.bottom_right_corner.y = y2
+        # append detection to the detection list
+        detections_msg.detections.append( d_msg )
+
+    # publish detections
+    ros_detections_publisher.publish( detections_msg )
+
+
+if __name__ == '__main__':
+    # check the presence of the ros topic to subscribe to
+    arguments = [ arg for arg in sys.argv[1:] if arg[:2] != '__' ]
+    if len(arguments) != 2:
+        print 'Usage:'
+        print '\troslaunch darknet_ros darknet_detector.launch image:=<input_image_topic> namespace:=<output_namespace>\n'
+        exit()
+    # get image topic
+    image_topic = arguments[0]
+    output_namespace = arguments[1]
+
+    # initialize ROS node
+    rospy.init_node('darknet_node')
+
+    # initialize Darknet
+    net_mode = 'tiny-' if use_tiny_yolo else ''
+    this_script_dir = os.path.dirname(os.path.realpath(__file__))
+    darknet_basedir = os.path.join(this_script_dir, '..')
+    yolo_cfg = os.path.join(darknet_basedir, 'cfg', net_mode+'yolo.cfg')
+    yolo_weights = os.path.join(darknet_basedir, 'models', net_mode+'yolo.weights')
+    yolo_meta = os.path.join(darknet_basedir, 'cfg', 'coco.data')
+    darknet_net = dn.load_net(yolo_cfg, yolo_weights, 0)
+    darknet_meta = dn.load_meta(yolo_meta)
+
+    # initialize ROS<->OpenCV bridge
+    opencv_bridge = CvBridge()
+
+    # subscribe to stream of images
+    rospy.Subscriber(image_topic, Image, ros_image_callback, queue_size=1)
+
+    # advertise new ROS topic
+    output_namespace = output_namespace if output_namespace[-1] != '/' else output_namespace[:-1]
+    detections_out_topic = "%s/%s" % (output_namespace, 'detections')
+    ros_detections_publisher = rospy.Publisher(detections_out_topic, DetectionsList, queue_size=1)
+
+    # consume messages
+    rospy.spin()
