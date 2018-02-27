@@ -55,6 +55,7 @@ def ros_image_callback(data):
     global opencv_bridge, darknet_net, darknet_meta, ros_detections_publisher, c_image_buffer
     # get image from ROS message
     cv_image = opencv_bridge.imgmsg_to_cv2(data, desired_encoding="rgb8")
+    img_orig_shape = cv_image.shape
 
     # resize image to improve performances
     img_ratio = float(cv_image.shape[0])/float(cv_image.shape[1])
@@ -86,6 +87,12 @@ def ros_image_callback(data):
         y2 = int(y + y/2 + 1)
         if x1 < 0: x1 = 0
         if y1 < 0: y1 = 0
+            
+        # rescale the bounding box to match the size of the image
+        scale_ratio = float(img_orig_shape[0]) / float(cv_image.shape[0])
+        x1, y1 = int(scale_ratio*x1), int(scale_ratio*y1)
+        x2, y2 = int(scale_ratio*x2), int(scale_ratio*y2)
+            
         # create detection msg
         d_msg = Detection()
         # put detection content into a Detection message
