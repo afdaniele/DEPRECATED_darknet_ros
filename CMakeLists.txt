@@ -163,7 +163,7 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 install(PROGRAMS
   src/darknet_node
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  DESTINATION ${CMAKE_BINARY_DIR}
 )
 
 ## Mark executables and/or libraries for installation
