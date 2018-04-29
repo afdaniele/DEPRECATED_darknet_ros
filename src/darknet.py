@@ -49,7 +49,7 @@ libdarknet_base_dir = os.path.join(this_script_dir, '..')
 possible_paths = [ libdarknet_base_dir ] + os.environ['LD_LIBRARY_PATH'].split(':')
 libdarknet_so_found = False
 for p in possible_paths:
-    libdarknet_so = os.path.join(p, 'libdarknet.so')
+    libdarknet_so = os.path.join(p, 'libdarknet_lib.so')
     if( os.path.exists(libdarknet_so) ):
         libdarknet_so_found = True
         break
