@@ -21,7 +21,7 @@ from cv_bridge import CvBridge
 opencv_bridge = None
 darknet_net = None
 darknet_meta = None
-use_tiny_yolo = False
+use_tiny_yolo = True
 preproc_img_width = 340
 ros_detections_publisher = None
 c_image_buffer = None
